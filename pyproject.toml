@@ -1,0 +1,10 @@
+[project]
+name = "slip-39-passphrase-brute-force"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+
+dependencies = [
+    "slip39 == 13.1.0",
+]
