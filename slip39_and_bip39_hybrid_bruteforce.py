@@ -18,6 +18,11 @@ import slip39
 from eth_account import Account
 import gc  # For garbage collection
 
+# Memory monitoring configuration (for 64GB system)
+MEMORY_WARNING_THRESHOLD_MB = 32000  # 32GB - first warning
+MEMORY_CRITICAL_THRESHOLD_MB = 40000  # 40GB - critical warning
+MEMORY_REPORT_INTERVAL = 100  # Report memory usage every N attempts
+
 # Enable HD wallet features
 Account.enable_unaudited_hdwallet_features()
 
@@ -204,6 +209,14 @@ def main():
     # Load environment
     load_dotenv()
     
+    # Override memory thresholds from environment if set
+    global MEMORY_WARNING_THRESHOLD_MB, MEMORY_CRITICAL_THRESHOLD_MB, MEMORY_REPORT_INTERVAL
+    MEMORY_WARNING_THRESHOLD_MB = int(os.getenv('MEMORY_WARNING_THRESHOLD_MB', MEMORY_WARNING_THRESHOLD_MB))
+    MEMORY_CRITICAL_THRESHOLD_MB = int(os.getenv('MEMORY_CRITICAL_THRESHOLD_MB', MEMORY_CRITICAL_THRESHOLD_MB))
+    MEMORY_REPORT_INTERVAL = int(os.getenv('MEMORY_REPORT_INTERVAL', MEMORY_REPORT_INTERVAL))
+    
+    print(f"📊 Memory thresholds: Warning={MEMORY_WARNING_THRESHOLD_MB/1024:.1f}GB, Critical={MEMORY_CRITICAL_THRESHOLD_MB/1024:.1f}GB")
+    
     # Get configuration from .env
     mnemonic = os.getenv('MNEMONIC', '').strip()
     components_str = os.getenv('WORDS', '').strip()
@@ -332,12 +345,17 @@ def main():
             print(f"🔄 Attempt {attempt:,}/{total_combinations:,} ({progress_pct:.1f}%): '{passphrase}'")
             
             # Show memory usage for long-running operations
-            if attempt > 100 and memory_usage["rss_mb"] != "N/A":
-                print(f"💾 Memory usage: {memory_usage['rss_mb']:.1f} MB")
+            if attempt > MEMORY_REPORT_INTERVAL and memory_usage["rss_mb"] != "N/A":
+                print(f"💾 Memory usage: {memory_usage['rss_mb']:.1f} MB ({memory_usage['rss_mb']/1024:.2f} GB)")
                 
-                # Warn if memory usage is getting high (>1GB)
-                if memory_usage["rss_mb"] > 1000:
-                    print(f"⚠️  High memory usage detected - running garbage collection...")
+                # Critical warning at 75% of system RAM (48GB for 64GB system)
+                if memory_usage["rss_mb"] > MEMORY_CRITICAL_THRESHOLD_MB:
+                    print(f"🚨 Very high memory usage ({memory_usage['rss_mb']/1024:.1f} GB) - consider reducing batch size!")
+                    gc.collect()  # Force garbage collection
+                
+                # First warning at 50% of system RAM (32GB for 64GB system)  
+                elif memory_usage["rss_mb"] > MEMORY_WARNING_THRESHOLD_MB:
+                    print(f"⚠️  High memory usage detected ({memory_usage['rss_mb']/1024:.1f} GB) - running garbage collection...")
                     gc.collect()  # Force garbage collection
             
             # Only show all methods for early attempts or matches
