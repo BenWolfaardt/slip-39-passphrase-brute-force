@@ -12,7 +12,7 @@ This tool:
 import os
 import hashlib
 import itertools
-from typing import List, Generator, Iterator
+from typing import List, Iterator
 from dotenv import load_dotenv
 import slip39
 from eth_account import Account
@@ -33,39 +33,18 @@ def generate_passphrase_combinations(components: List[str]) -> Iterator[str]:
                 yield "".join(perm)
 
 
-def seed_to_eth_address(seed: bytes, passphrase: str = "", account_index: int = 0) -> str:
-    """Convert seed + BIP-39 passphrase to Ethereum address using BIP-39 derivation."""
-    from mnemonic import Mnemonic
-    from eth_account import Account
-    import hashlib
-    
-    # Enable HD wallet features
-    Account.enable_unaudited_hdwallet_features()
-    
-    # For BIP-39 passphrase derivation, we need to create a new seed
-    # by combining the original seed with the passphrase using PBKDF2
-    if passphrase:
-        # Use PBKDF2 to derive final seed from original seed + passphrase
-        final_seed = hashlib.pbkdf2_hmac(
-            'sha512',
-            seed,
-            passphrase.encode('utf-8'),
-            2048,
-            64
-        )
-    else:
-        final_seed = seed
-    
-    # Generate private key from seed using BIP-32 derivation
-    # We'll use a simple approach to derive the private key
-    from eth_keys import keys
-    
-    # Use first 32 bytes of final seed as private key base
-    private_key_bytes = final_seed[:32]
-    
-    # Create account from private key
-    account = Account.from_key(private_key_bytes)
-    return account.address
+def slip39_seed_to_eth_address(master_secret: bytes, passphrase: str = "", account_index: int = 0) -> str:
+    """Convert SLIP-39 master secret + passphrase to Ethereum address using proper SLIP-39 derivation."""
+    try:
+        # Use slip39.account for proper derivation - this matches hardware wallets!
+        if passphrase:
+            eth_account = slip39.account(master_secret, 'ETH', f"m/44'/60'/0'/0/{account_index}", passphrase=passphrase)
+        else:
+            eth_account = slip39.account(master_secret, 'ETH', f"m/44'/60'/0'/0/{account_index}")
+        
+        return eth_account.address
+    except Exception as e:
+        raise ValueError(f"Error generating address: {e}")
 
 
 def main():
@@ -106,56 +85,27 @@ def main():
     print(f"🎯 Target: {target_address}")
     print()
     
-    # Step 1: Recover seed from SLIP-39 mnemonic (no validation)
-    print("🔐 Step 1: Recovering seed from SLIP-39 mnemonic...")
+    # Step 1: Recover master secret from SLIP-39 mnemonic
+    print("🔐 Step 1: Recovering master secret from SLIP-39 mnemonic...")
     try:
-        # Try to recover SLIP-39 seed directly
-        shares = [mnemonic]  # Single share
+        # Use SLIP-39 to get the master secret
+        master_secret = slip39.recover([mnemonic])
         
-        # Use slip39.recover to get the master secret
-        master_secret = slip39.recover(shares)
-        
-        # Create 64-byte seed from master secret for BIP-39 compatibility
-        seed = hashlib.pbkdf2_hmac(
-            'sha512',
-            master_secret,
-            b'mnemonic',  # Standard BIP-39 salt prefix
-            2048,
-            64
-        )
-        
-        print(f"✅ SLIP-39 seed recovered successfully")
+        print(f"✅ SLIP-39 master secret recovered successfully")
         print(f"📊 Master secret: {master_secret.hex()[:32]}...")
-        print(f"📊 Derived seed: {seed.hex()[:32]}...")
+        print(f"📊 Master secret length: {len(master_secret)} bytes")
             
     except Exception as e:
-        print(f"❌ Error recovering SLIP-39 seed: {e}")
+        print(f"❌ Error recovering SLIP-39 master secret: {e}")
         print("💡 Your mnemonic might not be a complete/valid SLIP-39 share")
-        
-        # If SLIP-39 fails, maybe it's actually a seed phrase we can use directly
-        print("🔄 Trying to use mnemonic words as entropy source...")
-        try:
-            # Convert mnemonic words to bytes as entropy
-            mnemonic_bytes = mnemonic.encode('utf-8')
-            seed = hashlib.pbkdf2_hmac(
-                'sha512',
-                mnemonic_bytes,
-                b'mnemonic',
-                2048,
-                64
-            )
-            print(f"✅ Using mnemonic as entropy source")
-            print(f"📊 Derived seed: {seed.hex()[:32]}...")
-        except Exception as e2:
-            print(f"❌ All recovery methods failed: {e2}")
-            return
+        return
     
     print()
     
     # Step 2: Test empty passphrase first
     print("🔐 Step 2: Testing empty passphrase...")
     try:
-        address = seed_to_eth_address(seed, "", 0)
+        address = slip39_seed_to_eth_address(master_secret, "", 0)
         print(f"📍 Empty passphrase → {address}")
         if address.lower() == target_address.lower():
             print(f"🎉 SUCCESS! Empty passphrase matches target!")
@@ -184,7 +134,7 @@ def main():
         attempt += 1
         
         try:
-            address = seed_to_eth_address(seed, passphrase, 0)
+            address = slip39_seed_to_eth_address(master_secret, passphrase, 0)
             
             # Show progress
             if attempt <= 5 or attempt % 10 == 0:
@@ -201,7 +151,7 @@ def main():
                 # Final verification
                 print()
                 print("🔍 Final verification:")
-                verify_address = seed_to_eth_address(seed, passphrase, 0)
+                verify_address = slip39_seed_to_eth_address(master_secret, passphrase, 0)
                 print(f"   Passphrase: '{passphrase}'")
                 print(f"   Address: {verify_address}")
                 print(f"   Match: {'✅ YES' if verify_address.lower() == target_address.lower() else '❌ NO'}")
