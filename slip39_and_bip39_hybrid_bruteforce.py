@@ -33,14 +33,17 @@ def generate_passphrase_combinations(components: List[str]) -> Iterator[str]:
                 yield "".join(perm)
 
 
-def slip39_seed_to_eth_address(master_secret: bytes, passphrase: str = "", account_index: int = 0) -> str:
-    """Convert SLIP-39 master secret + passphrase to Ethereum address using proper SLIP-39 derivation."""
+def slip39_seed_to_eth_address(mnemonic: str, passphrase: str = "", account_index: int = 0) -> str:
+    """Convert SLIP-39 mnemonic + passphrase to Ethereum address using proper SLIP-39 derivation."""
     try:
-        # Use slip39.account for proper derivation - this matches hardware wallets!
+        # Apply passphrase during SLIP-39 recovery - this is the key!
         if passphrase:
-            eth_account = slip39.account(master_secret, 'ETH', f"m/44'/60'/0'/0/{account_index}", passphrase=passphrase)
+            master_secret = slip39.recover([mnemonic], passphrase=passphrase.encode('utf-8'))
         else:
-            eth_account = slip39.account(master_secret, 'ETH', f"m/44'/60'/0'/0/{account_index}")
+            master_secret = slip39.recover([mnemonic])
+        
+        # Then derive account normally (no passphrase parameter here)
+        eth_account = slip39.account(master_secret, 'ETH', f"m/44'/60'/0'/0/{account_index}")
         
         return eth_account.address
     except Exception as e:
@@ -105,7 +108,7 @@ def main():
     # Step 2: Test empty passphrase first
     print("🔐 Step 2: Testing empty passphrase...")
     try:
-        address = slip39_seed_to_eth_address(master_secret, "", 0)
+        address = slip39_seed_to_eth_address(mnemonic, "", 0)
         print(f"📍 Empty passphrase → {address}")
         if address.lower() == target_address.lower():
             print(f"🎉 SUCCESS! Empty passphrase matches target!")
@@ -134,7 +137,7 @@ def main():
         attempt += 1
         
         try:
-            address = slip39_seed_to_eth_address(master_secret, passphrase, 0)
+            address = slip39_seed_to_eth_address(mnemonic, passphrase, 0)
             
             # Show progress
             if attempt <= 5 or attempt % 10 == 0:
@@ -151,7 +154,7 @@ def main():
                 # Final verification
                 print()
                 print("🔍 Final verification:")
-                verify_address = slip39_seed_to_eth_address(master_secret, passphrase, 0)
+                verify_address = slip39_seed_to_eth_address(mnemonic, passphrase, 0)
                 print(f"   Passphrase: '{passphrase}'")
                 print(f"   Address: {verify_address}")
                 print(f"   Match: {'✅ YES' if verify_address.lower() == target_address.lower() else '❌ NO'}")
