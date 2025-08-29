@@ -1,10 +1,13 @@
 [project]
 name = "slip-39-passphrase-brute-force"
 version = "0.1.0"
-description = "Add your description here"
+description = "SLIP-39 passphrase brute force tool with word combination support"
 readme = "README.md"
 requires-python = ">=3.12"
 
 dependencies = [
-    "slip39 == 13.1.0",
+    "eth-account>=0.13.7",
+    "python-dotenv>=1.0.0",
+    "slip39>=13.1.0",
+    "requests>=2.28.0",
 ]
