@@ -10,4 +10,5 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "slip39>=13.1.0",
     "requests>=2.28.0",
+    "mnemonic>=0.21",
 ]

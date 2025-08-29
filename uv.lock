@@ -891,6 +891,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "eth-account" },
+    { name = "mnemonic" },
     { name = "python-dotenv" },
     { name = "requests" },
     { name = "slip39" },
@@ -899,6 +900,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "eth-account", specifier = ">=0.13.7" },
+    { name = "mnemonic", specifier = ">=0.21" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "requests", specifier = ">=2.28.0" },
     { name = "slip39", specifier = ">=13.1.0" },
