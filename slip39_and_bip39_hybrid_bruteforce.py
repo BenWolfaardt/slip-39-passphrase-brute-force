@@ -16,21 +16,61 @@ from typing import List, Iterator
 from dotenv import load_dotenv
 import slip39
 from eth_account import Account
+import gc  # For garbage collection
 
 # Enable HD wallet features
 Account.enable_unaudited_hdwallet_features()
 
 
+def get_memory_usage() -> dict:
+    """Get current memory usage (works on Unix-like systems)."""
+    try:
+        import psutil
+        process = psutil.Process()
+        memory_info = process.memory_info()
+        return {
+            "rss_mb": memory_info.rss / 1024 / 1024,  # Resident Set Size in MB
+            "vms_mb": memory_info.vms / 1024 / 1024,  # Virtual Memory Size in MB
+        }
+    except ImportError:
+        # Fallback for systems without psutil
+        try:
+            import resource
+            usage = resource.getrusage(resource.RUSAGE_SELF)
+            return {
+                "rss_mb": usage.ru_maxrss / 1024,  # On Linux: KB, on macOS: bytes
+                "vms_mb": "N/A"
+            }
+        except:
+            return {"rss_mb": "N/A", "vms_mb": "N/A"}
+
+
 def generate_passphrase_combinations(components: List[str]) -> Iterator[str]:
-    """Generate all possible combinations of passphrase components."""
+    """Generate all possible combinations of passphrase components using memory-efficient streaming."""
     # Try empty passphrase first
     yield ""
     
-    # Then try all combinations and permutations
+    # Then try all combinations and permutations - streaming approach
     for length in range(1, len(components) + 1):
         for combo in itertools.combinations(components, length):
             for perm in itertools.permutations(combo):
                 yield "".join(perm)
+
+
+def count_total_combinations(components: List[str]) -> int:
+    """Count total combinations without generating them all (memory efficient)."""
+    total = 1  # Empty passphrase
+    
+    for length in range(1, len(components) + 1):
+        # combinations(n, r) * permutations(r)
+        n_combinations = len(list(itertools.combinations(components, length)))
+        n_permutations_per_combo = 1
+        for i in range(1, length + 1):
+            n_permutations_per_combo *= i  # factorial(length)
+        
+        total += n_combinations * n_permutations_per_combo
+    
+    return total
 
 
 def slip39_seed_to_eth_address(mnemonic: str, passphrase: str = "", account_index: int = 0, method: str = "keystone") -> str:
@@ -237,22 +277,29 @@ def main():
     
     print()
     
-    # Step 3: Brute force with component combinations
+    # Step 3: Brute force with component combinations (memory-efficient)
     print("🔐 Step 3: Brute forcing passphrase combinations...")
     
-    total_combinations = sum(
-        len(list(itertools.permutations(itertools.combinations(components, r), r)))
-        for r in range(1, len(components) + 1)
-    )
-    print(f"🔢 Total combinations to try: {total_combinations}")
+    # Use memory-efficient counting
+    total_combinations = count_total_combinations(components)
+    print(f"🔢 Total combinations to try: {total_combinations:,}")
+    
+    if total_combinations > 10000:
+        print(f"⚠️  Large number of combinations detected!")
+        print(f"� Using memory-efficient streaming approach...")
+        print(f"📊 Progress updates every 100 attempts")
+    
     print()
     
     attempt = 0
+    last_progress_time = __import__('time').time()
+    
     for passphrase in generate_passphrase_combinations(components):
         if passphrase == "":  # Skip empty, already tested
             continue
             
         attempt += 1
+        current_time = __import__('time').time()
         
         # Test all methods for this passphrase
         passphrase_results = test_all_methods(mnemonic, passphrase, target_address)
@@ -269,15 +316,44 @@ def main():
                 matching_address = result["address"]
                 break
         
-        # Show progress
-        if attempt <= 5 or attempt % 10 == 0 or match_found:
-            print(f"🔄 Attempt {attempt}: '{passphrase}'")
-            for method_key, result in passphrase_results.items():
-                status = "✅ MATCH!" if result["matches"] else "❌"
-                if result["error"]:
-                    print(f"      {result['name']}: ERROR")
-                else:
-                    print(f"      {result['name']}: {result['address']} {status}")
+        # Memory-efficient progress reporting
+        show_progress = (
+            attempt <= 5 or  # First 5 attempts
+            match_found or   # When match found
+            attempt % 100 == 0 or  # Every 100 attempts for large runs
+            (attempt % 10 == 0 and total_combinations <= 1000) or  # Every 10 for smaller runs
+            (current_time - last_progress_time) >= 30  # Every 30 seconds
+        )
+        
+        if show_progress:
+            progress_pct = (attempt / total_combinations) * 100 if total_combinations > 0 else 0
+            memory_usage = get_memory_usage()
+            
+            print(f"🔄 Attempt {attempt:,}/{total_combinations:,} ({progress_pct:.1f}%): '{passphrase}'")
+            
+            # Show memory usage for long-running operations
+            if attempt > 100 and memory_usage["rss_mb"] != "N/A":
+                print(f"💾 Memory usage: {memory_usage['rss_mb']:.1f} MB")
+                
+                # Warn if memory usage is getting high (>1GB)
+                if memory_usage["rss_mb"] > 1000:
+                    print(f"⚠️  High memory usage detected - running garbage collection...")
+                    gc.collect()  # Force garbage collection
+            
+            # Only show all methods for early attempts or matches
+            if attempt <= 5 or match_found:
+                for method_key, result in passphrase_results.items():
+                    status = "✅ MATCH!" if result["matches"] else "❌"
+                    if result["error"]:
+                        print(f"      {result['name']}: ERROR")
+                    else:
+                        print(f"      {result['name']}: {result['address']} {status}")
+            else:
+                # For bulk processing, just show if any matched
+                if not match_found:
+                    print(f"      No matches found")
+            
+            last_progress_time = current_time
         
         # Check if match found
         if match_found:
